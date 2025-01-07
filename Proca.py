@@ -57,7 +57,7 @@ def Shoot_Proca1(cond, Uintx, Uinty, Uintz, rmax, rmin=0, LambT=0, nodos=[0, 0, 
     Uminy, Umaxy = Uinty
     Uminz, Umaxz = Uintz
 
-    print(f'Encontrando un perfil con {nodos}')
+    #print(f'Encontrando un perfil con {nodos}')
 
     #De nuevo definimos los eventos.
     def Sigx(r, U, arg): return U[0]
@@ -105,10 +105,10 @@ def Shoot_Proca1(cond, Uintx, Uinty, Uintz, rmax, rmin=0, LambT=0, nodos=[0, 0, 
         if abs((iInterv[1]-iInterv[0])/2) <= lim:
             if info:
                 print(out)
-                print('Maxima precisión alcanzada: U0x = ', V0[6], ' U0y = ', V0[8], ' U0z = ', V0[10], 'radio', rTemp)
+                #print('Maxima precisión alcanzada: U0x = ', V0[6], ' U0y = ', V0[8], ' U0z = ', V0[10], 'radio', rTemp)
             
             if out==outval:
-                print('Maxima precisión alcanzada: U0x = ', V0[6], ' U0y = ', V0[8], ' U0z = ', V0[10], 'radio', rTemp)
+                #print('Maxima precisión alcanzada: U0x = ', V0[6], ' U0y = ', V0[8], ' U0z = ', V0[10], 'radio', rTemp)
                 return V0[6], V0[8], V0[10], rTemp, sol.t_events[0], sol.t_events[2], sol.t_events[4]
             else:
                 #Uintrs = np.copy(UintrOrig) # reinicio los que  ya no son iguales
@@ -121,7 +121,7 @@ def Shoot_Proca1(cond, Uintx, Uinty, Uintz, rmax, rmin=0, LambT=0, nodos=[0, 0, 
             print(Uintrs)
 
         if np.all(np.array([shoot(*i) for i in Uintrs])==u0): 
-            print('Found: U0x = ', V0[6], ' U0y = ', V0[8], ' U0z = ', V0[10], 'radio', rTemp)
+            #print('Found: U0x = ', V0[6], ' U0y = ', V0[8], ' U0z = ', V0[10], 'radio', rTemp)
             return V0[6], V0[8], V0[10], rTemp, sol.t_events[0], sol.t_events[2], sol.t_events[4]
         
         if k==klim:
@@ -299,7 +299,7 @@ def algebSyst(arg, remNul=True, info=False):
     return ck1
 #Ahora si tenemos todo lo necesario para hacer el fiting
 def fitting(syst, V0, indck, indXc, BCind, inddXc, limit, argf=None, info=False,
-            tol=1e-6, met='RK45', Rtol=1e-7, Atol=1e-8, npt=100, klim=500):
+            tol=1e-6, met='RK45', Rtol=1e-7, Atol=1e-8, npt=100, klim=1000):
     """
     syst: Sistema de ecuaciones diferenciales con la estructura f(r, yV, arg).
     V0 : Vector con las condiciones iniciales
@@ -326,7 +326,7 @@ def fitting(syst, V0, indck, indXc, BCind, inddXc, limit, argf=None, info=False,
 
         # Verificar si la solución cumple las condiciones de contorno
         if np.all(error < tol):
-            print(f"Convergencia alcanzada en {k} iteraciones.")
+            #print(f"Convergencia alcanzada en {k} iteraciones.")
             return V0
 
         # Calcular derivadas para ajuste
@@ -459,6 +459,462 @@ def MasaEnergia_Datos(datos, gamma, Nptos=500, metodo='RK45', rtol=1e-9, atol=1e
         resultados.append([MT, EnT, px[0], py[0], pz[0]])
 
     return np.array(resultados)
+    
+def shoot_ref(Ini0, Uxint, Uyint, Uzint, rmax0, LambT=0, nodos=[0, 0, 0],sx=True,sy=True,sz=False):
+    """
+    Función que da la solución refinada, la masa y energía de forma directa directa.
+    
+    Args:
+        Ini0: Lista con las condiciones iniciales.
+        Uxint, Uyint, Uzint: Semillas iniciales para las soluciones Ux, Uy, Uz.
+        rmax0: Radio máximo inicial.
+        LambT: Parámetro lambda de ajuste (por defecto 0).
+        nodos: Lista de nodos iniciales para el shooting.
+        sx, sy, sz: Indicadores para seleccionar cuál componente considerar (x, y o z).
+    
+    Returns:
+        U0: Solución refinada inicial.
+        rmax: Radio máximo tras refinamiento.
+        masaT: Masa calculada.
+        EnergiaT: Energía total calculada.
+    """
+    # Solución inicial no refinada
+    U0x, U0y, U0z, rTmax, *_ = Shoot_Proca1(
+        Ini0, Uxint, Uyint, Uzint, rmax0,
+        LambT=LambT, nodos=nodos, lim=1e-8,
+        info=False, klim=1500, outval=10, delta=0.2
+    )
+    
+    # Definición del rango para el refinamiento
+    rmin, rmax = 0, rTmax + 10
+    limit = [rmin, rmax]
+    
+    # Variables iniciales y semillas no refinadas
+    p0x, p1x, p0y, p1y, p0z, p1z, u1x, u1y, u1z = Ini0
+    uk = [U0x, U0y, U0z]
+    
+    # Configuración inicial del vector V0 y sus derivadas
+    V0X = [p0x, p1x, p0y, p1y, p0z, p1z, None, u1x, None, u1y, None, u1z]
+    V0Duk = np.zeros(12 * 3)
+    V0Duk[6] = 1  # Derivadas no triviales
+    V0Duk[20] = 1
+    V0Duk[-2] = 1
+    V0 = np.concatenate((V0X, V0Duk))
+    
+    # Ajuste de las posiciones para las constantes ck
+    indck = np.concatenate(([False, False, False, False, False, False, True, False, True, False, True, False], [False]*36))
+    V0[indck] = uk
+    
+    # Índices de las variables para resolver y sus derivadas
+    indXc = np.array([False] * 48)
+    indXc[:5:2] = True  # Variables seleccionadas
+    
+    inddXc = np.array([False] * 48)
+    inddXc[12::12] = True
+    inddXc[14::12] = True
+    inddXc[16::12] = True
+    
+    # Refinamiento usando fitting
+    V0fit = fitting(
+        system_refinado, V0, indck, indXc, [0, 0, 0], inddXc,
+        limit, argf=LambT, tol=1e-10
+    )
+    
+    # Cálculo de la masa y energía total
+    metodo = 'RK45'
+    Rtol, Atol = 1e-9, 1e-10
+    Nptos = 500
+    rspan = np.linspace(rmin, rmax, Nptos)
+    U0 = V0fit[:12]
+    
+    sol = solve_ivp(
+        systemProca, [rmin, rmax], U0, t_eval=rspan,
+        args=([LambT],), method=metodo, rtol=Rtol, atol=Atol
+    )
+    
+    rad = sol.t
+    px, ux = sol.y[0], sol.y[6][0]
+    py, uy = sol.y[2], sol.y[8][0]
+    pz, uz = sol.y[4], sol.y[10][0]
+    
+    
+    
+    # Selección del componente para calcular energía y masa
+    Ex, Mx = energMul(rad, px**2, ux)
+    Ey, My = energMul(rad, py**2, uy)
+    Ez, Mz = energMul(rad, pz**2, uz)
+    if (sz==False):
+        Mz,Ez = 0,0
+    if (sx==False):
+        Mx,Ex = 0,0
+    if (sy==False):
+        My,Ey = 0,0
+    masaT = 4*np.pi*(Mx+My+Mz)
+    EnergiaT = Ex + Ey + Ez
+    return U0, rmax, masaT, EnergiaT
+#################################################################################################################################################################
+#Aqui es el shooting para concectar las soluciones.
+"""def shoot_masa(n ,masa ,xmax, ymax, Uxint, Uyint, Uzint, rmax0, LambT, nodos,sx=True,sy=True,sz=False, tol = 0.05,kmax=20):
+    #Lo ideal es empezar desde la izquierde e irnos moviendo hacia la derecha
+    #Tomamos puntos en x que esten igualmente espaciados para solo hacer el shooting en y.
+    p0z = 0
+    ymin = 0
+    ymax0 = ymax
+    aprox = 0.5
+    config = []
+    j = 0
+    while j < n:
+        refinar = False
+        #Primero obtenemos la solución no refinada y una masa aporximada
+        k = 0
+        ymin = 0
+        ymax = ymax0
+        p0x = np.random.random()*xmax
+        while True:
+            p0y = shoot(ymin,ymax)
+            Ini0 = [p0x,0, p0y, 0, p0z, 0, 0, 0, 0]
+            U0x, U0y, U0z, rTmax, *_ = Shoot_Proca1(Ini0, Uxint, Uyint, Uzint, rmax0,LambT=LambT, nodos=nodos, lim=1e-8,info=False, klim=1500, outval=10, 
+                                                          delta=0.2)
+            rmin, rmax = 0, rTmax
+            Nptos = 500; rspan = np.linspace(rmin, rmax, Nptos); arg = [LambT]
+            met = 'RK45'; Rtol = 1e-09; Atol = 1e-10
+            U0 = [p0x, 0, p0y, 0, p0z, 0, U0x, 0, U0y, 0, U0z, 0]
+            sol = solve_ivp(systemProca, [rmin, rmax], U0, t_eval=rspan,
+                         args=(arg,), method=met, rtol=Rtol, atol=Atol)
+            rad = sol.t
+            px, ux = sol.y[0], sol.y[6][0]
+            py, uy = sol.y[2], sol.y[8][0]
+            pz, uz = sol.y[4], sol.y[10][0]
+            #Calculamos la masa
+            Mx = Calc_Masa(rad, px**2)
+            My = Calc_Masa(rad, py**2)
+            Mz = Calc_Masa(rad, pz**2)
+            if (sz==False):
+                Mz = 0
+            if (sx==False):
+                Mx = 0
+            if (sy==False):
+                My = 0
+            masaT = 4*np.pi*(Mx+My+Mz)
+            if (masaT > masa + aprox):
+                ymax = p0y
+            elif(masaT < masa - aprox):
+                ymin = p0y
+            else:
+                refinar = True
+                print(f"iteracion: {k} masa: {masaT}")
+            if refinar:
+                #Se cumplió la tolerancia aproximada, ahora podemos refinar para acercarnos más al valor de la masa
+                # Definición del rango para el refinamiento
+                rmin, rmax = 0, rTmax + 6
+                limit = [rmin, rmax]
+    
+                # Variables iniciales y semillas no refinadas
+                p1x, p1y, p1z, u1x, u1y, u1z = 0,0,0,0,0,0
+                uk = [U0x, U0y, U0z]
+                # Configuración inicial del vector V0 y sus derivadas
+                V0X = [p0x, 0, p0y, 0, p0z, 0, None, u1y, None, u1y, None, u1z]
+                V0Duk = np.zeros(12 * 3)
+                V0Duk[6] = 1  # Derivadas no triviales
+                V0Duk[20] = 1
+                V0Duk[-2] = 1
+                V0 = np.concatenate((V0X, V0Duk))
+    
+                # Ajuste de las posiciones para las constantes ck
+                indck = np.concatenate(([False, False, False, False, False, False, True, False, True, False, True, False], [False]*36))
+                V0[indck] = uk
+    
+                # Índices de las variables para resolver y sus derivadas
+                indXc = np.array([False] * 48)
+                indXc[:5:2] = True  # Variables seleccionadas
+    
+                inddXc = np.array([False] * 48)
+                inddXc[12::12] = True
+                inddXc[14::12] = True
+                inddXc[16::12] = True
+    
+                # Refinamiento usando fitting
+                V0fit = fitting(
+                    system_refinado, V0, indck, indXc, [0, 0, 0], inddXc,
+                    limit, argf=LambT, tol=1e-10
+                )
+    
+                # Cálculo de la masa y energía total
+                metodo = 'RK45'
+                Rtol, Atol = 1e-9, 1e-10
+                Nptos = 500
+                rspan = np.linspace(rmin, rmax, Nptos)
+                U0 = V0fit[:12]
+    
+                sol = solve_ivp(
+                systemProca, [rmin, rmax], U0, t_eval=rspan,
+                args=([LambT],), method=metodo, rtol=Rtol, atol=Atol
+                )
+    
+                rad = sol.t
+                px, ux = sol.y[0], sol.y[6][0]
+                py, uy = sol.y[2], sol.y[8][0]
+                pz, uz = sol.y[4], sol.y[10][0]
+                 #Calculamos la masa
+                Mx = Calc_Masa(rad, px**2)
+                My = Calc_Masa(rad, py**2)
+                Mz = Calc_Masa(rad, pz**2)
+                if (sz==False):
+                    Mz = 0
+                if (sx==False):
+                    Mx = 0
+                if (sy==False):
+                    My = 0
+                masaT = 4*np.pi*(Mx+My+Mz)
+                if (abs(masaT-masa)<tol):
+                    config.append([U0[6], U0[8], U0[10], rmax, [U0[0], U0[2], U0[5]], nodos, LambT, masaT])
+                    print("configuracion encontrada:")
+                    print(config(j))
+                    j += 1 
+                    break
+                if(k == kmax):
+                    print("numero máximo de iteraciones")
+                    break
+                if (masaT > masa + tol):
+                    ymax = p0y
+                elif(masaT < masa - tol):
+                    ymin = p0y
+                print(masaT)
+            k += 1
+    return config"""
+#El metodo anterior no parece funcionar porque las masas refindas y no refinadas son muy diferentes. Mejor se va a refinar todo
+def shoot_masa(config,n ,masa ,xmax0=1, ymax0=1, Uxint=[0.1,2], Uyint=[0.1,2], Uzint=[0.1,2], rmax0=25, LambT=0, nodos=[0,1,0],sx=True,sy=True,sz=False, tol = 0.05,kmax=20,estacionario = False):
+    #Lo ideal es empezar desde la izquierde e irnos moviendo hacia la derecha
+    #Tomamos puntos en x que esten igualmente espaciados para solo hacer el shooting en y.
+    p0z = 0
+    ymin = 0
+    aprox = 0.5
+    xmax = xmax0
+    r00 = rmax0
+    if estacionario:
+        config, ymaxest = shoot_estacionario(masa, Uxint, Uyint, Uzint, rmax0, LambT, nodos,sx=False,sy=True,sz=False, tol = 0.05,kmax=20) 
+        ymax0 = ymaxest + 0.1
+    j = 0
+    while j < n:
+        #Primero obtenemos la solución no refinada y una masa aporximada
+        k = 0
+        ymin = 0
+        ymax = ymax0
+        p0x = np.random.random()*xmax
+        while True:
+            p0y = shoot(ymin,ymax)
+            Ini0 = [p0x,0, p0y, 0, p0z, 0, 0, 0, 0]
+            U0x, U0y, U0z, rTmax, *_ = Shoot_Proca1(Ini0, Uxint, Uyint, Uzint, r00,LambT=LambT, nodos=nodos, lim=1e-8,info=False, klim=1500, outval=10, 
+                                                          delta=0.2)
+            rmin, rmax = 0, rTmax
+            Nptos = 500; rspan = np.linspace(rmin, rmax, Nptos); arg = [LambT]
+            met = 'RK45'; Rtol = 1e-09; Atol = 1e-10
+            U0 = [p0x, 0, p0y, 0, p0z, 0, U0x, 0, U0y, 0, U0z, 0]
+            sol = solve_ivp(systemProca, [rmin, rmax], U0, t_eval=rspan,
+                         args=(arg,), method=met, rtol=Rtol, atol=Atol)
+            rad = sol.t
+            px, ux = sol.y[0], sol.y[6][0]
+            py, uy = sol.y[2], sol.y[8][0]
+            pz, uz = sol.y[4], sol.y[10][0]
+            # Definición del rango para el refinamiento
+            rmin, rmax = 0, rTmax + 4.4
+            limit = [rmin, rmax]
+            # Variables iniciales y semillas no refinadas
+            p1x, p1y, p1z, u1x, u1y, u1z = 0,0,0,0,0,0
+            uk = [U0x, U0y, U0z]
+            # Configuración inicial del vector V0 y sus derivadas
+            V0X = [p0x, 0, p0y, 0, p0z, 0, None, u1y, None, u1y, None, u1z]
+            V0Duk = np.zeros(12 * 3)
+            V0Duk[6] = 1  # Derivadas no triviales
+            V0Duk[20] = 1
+            V0Duk[-2] = 1
+            V0 = np.concatenate((V0X, V0Duk))
+    
+            # Ajuste de las posiciones para las constantes ck
+            indck = np.concatenate(([False, False, False, False, False, False, True, False, True, False, True, False], [False]*36))
+            V0[indck] = uk
+    
+            # Índices de las variables para resolver y sus derivadas
+            indXc = np.array([False] * 48)
+            indXc[:5:2] = True  # Variables seleccionadas
+
+            inddXc = np.array([False] * 48)
+            inddXc[12::12] = True
+            inddXc[14::12] = True
+            inddXc[16::12] = True
+    
+            # Refinamiento usando fitting
+            V0fit = fitting(
+                system_refinado, V0, indck, indXc, [0,0,0], inddXc,
+                limit, argf=LambT, tol=1e-10
+                )
+            # Cálculo de la masa y energía total
+            metodo = 'RK45'
+            Rtol, Atol = 1e-9, 1e-10
+            Nptos = 500
+            rspan = np.linspace(rmin, rmax, Nptos)
+            U0 = V0fit[:12]
+    
+            sol = solve_ivp(
+            systemProca, [rmin, rmax], U0, t_eval=rspan,
+                args=([LambT],), method=metodo, rtol=Rtol, atol=Atol
+                )
+            rad = sol.t
+            px, ux = sol.y[0], sol.y[6][0]
+            py, uy = sol.y[2], sol.y[8][0]
+            pz, uz = sol.y[4], sol.y[10][0]
+            #Calculamos la masa
+            Mx = Calc_Masa(rad, px**2)
+            My = Calc_Masa(rad, py**2)
+            Mz = Calc_Masa(rad, pz**2)
+            if (sz==False):
+                Mz = 0
+            if (sx==False):
+                Mx = 0
+            if (sy==False):
+                My = 0
+            masaT = 4*np.pi*(Mx+My+Mz)
+            if (abs(masaT-masa)<tol):
+                #ux,uy,uz,rmax,[p0],lambT
+                auxx = [U0[6], U0[8], U0[10], rmax, [U0[0], U0[2], U0[5]],LambT]
+                config.append(auxx)
+                print(f"configuracion encontrada con masa {masaT}:")
+                print([U0[6], U0[8], U0[10], rmax, [U0[0], U0[2], U0[5]],LambT])
+                #Graficamos para asegurar que las soluciones sean validas
+                U00 = [auxx[4][0],0,auxx[4][1],0,auxx[4][2], 0,auxx[0], 0,auxx[1],0,auxx[2],0]
+                plotPerf(U00,auxx[3],0)
+                j += 1 
+                break
+            if(k == kmax):
+                print("numero máximo de iteraciones")
+                break
+            if (masaT > masa + tol):
+                ymax = p0y
+            elif(masaT < masa - tol):
+                ymin = p0y
+            auxx = [U0[6], U0[8], U0[10], rmax, [U0[0], U0[2], U0[5]],LambT]
+            #Graficamos para asegurar que las soluciones sean validas
+            U00 = [auxx[4][0],0,auxx[4][1],0,auxx[4][2], 0,auxx[0], 0,auxx[1],0,auxx[2],0]
+            print(U00)
+            plotPerf(U00,auxx[3],0)
+            print(masaT)
+            k += 1
+    #Intercambiamos elementos para que el estado excitado quede al final
+    if estacionario:
+        config[1], config[-1] = config[-1], config[1]
+
+#Esta función es para calcular las configuraciones estacionarias
+def shoot_estacionario(masa, Uxint, Uyint, Uzint, rmax0, LambT, nodos,sx=False,sy=True,sz=False, tol = 0.05,kmax=20):
+    #Lo ideal es empezar desde la izquierde e irnos moviendo hacia la derecha
+    #Tomamos puntos en x que esten igualmente espaciados para solo hacer el shooting en y.
+    p0z = 0
+    ymin = 0
+    aprox = 0.5
+    config = []
+    p0x = 0
+    #Primero obtenemos la solución no refinada y una masa aporximada
+    k = 0
+    ymin = 0
+    ymax = 0.1
+    while True:
+        p0y = shoot(ymin,ymax)
+        Ini0 = [p0x,0, p0y, 0, p0z, 0, 0, 0, 0]
+        U0x, U0y, U0z, rTmax, *_ = Shoot_Proca1(Ini0, Uxint, Uyint, Uzint, rmax0,LambT=LambT, nodos=nodos, lim=1e-8,info=False, klim=1500, outval=10, 
+                                                          delta=0.2)
+        rmin, rmax = 0, rTmax
+        Nptos = 500; rspan = np.linspace(rmin, rmax, Nptos); arg = [LambT]
+        met = 'RK45'; Rtol = 1e-09; Atol = 1e-10
+        U0 = [p0x, 0, p0y, 0, p0z, 0, U0x, 0, U0y, 0, U0z, 0]
+        sol = solve_ivp(systemProca, [rmin, rmax], U0, t_eval=rspan,
+                     args=(arg,), method=met, rtol=Rtol, atol=Atol)
+        rad = sol.t
+        px, ux = sol.y[0], sol.y[6][0]
+        py, uy = sol.y[2], sol.y[8][0]
+        pz, uz = sol.y[4], sol.y[10][0]
+        # Definición del rango para el refinamiento
+        rmin, rmax = 0, rTmax + 6
+        limit = [rmin, rmax]
+        # Variables iniciales y semillas no refinadas
+        p1x, p1y, p1z, u1x, u1y, u1z = 0,0,0,0,0,0
+        uk = [U0x, U0y, U0z]
+        # Configuración inicial del vector V0 y sus derivadas
+        V0X = [p0x, 0, p0y, 0, p0z, 0, None, u1y, None, u1y, None, u1z]
+        V0Duk = np.zeros(12 * 3)
+        V0Duk[6] = 1  # Derivadas no triviales
+        V0Duk[20] = 1
+        V0Duk[-2] = 1
+        V0 = np.concatenate((V0X, V0Duk))
+    
+        # Ajuste de las posiciones para las constantes ck
+        indck = np.concatenate(([False, False, False, False, False, False, True, False, True, False, True, False], [False]*36))
+        V0[indck] = uk
+    
+        # Índices de las variables para resolver y sus derivadas
+        indXc = np.array([False] * 48)
+        indXc[:5:2] = True  # Variables seleccionadas
+
+        inddXc = np.array([False] * 48)
+        inddXc[12::12] = True
+        inddXc[14::12] = True
+        inddXc[16::12] = True
+    
+        # Refinamiento usando fitting
+        V0fit = fitting(
+                system_refinado, V0, indck, indXc, [0, 0, 0], inddXc,
+                limit, argf=LambT, tol=1e-10
+                )
+        # Cálculo de la masa y energía total
+        metodo = 'RK45'    
+        Rtol, Atol = 1e-9, 1e-10
+        Nptos = 500
+        rspan = np.linspace(rmin, rmax, Nptos)
+        U0 = V0fit[:12]
+    
+        sol = solve_ivp(
+        systemProca, [rmin, rmax], U0, t_eval=rspan,
+                args=([LambT],), method=metodo, rtol=Rtol, atol=Atol
+                )
+        rad = sol.t
+        px, ux = sol.y[0], sol.y[6][0]
+        py, uy = sol.y[2], sol.y[8][0]
+        pz, uz = sol.y[4], sol.y[10][0]
+        #Calculamos la masa
+        Mx = Calc_Masa(rad, px**2)
+        My = Calc_Masa(rad, py**2)
+        Mz = Calc_Masa(rad, pz**2)
+        if (sz==False):
+            Mz = 0
+        if (sx==False):
+            Mx = 0
+        if (sy==False):
+            My = 0
+        masaT = 4*np.pi*(Mx+My+Mz)
+        if (abs(masaT-masa)<tol):
+            #ux,uy,uz,rmax,[p0],lambT
+            config.append([U0[6], U0[8], U0[10], rmax, [U0[0], U0[2], U0[5]],LambT])
+            print(f"Primer estado excitado encontrado con masa {masaT}:")
+            print(f"El valor de sigma_y es: {p0y}")
+            print(config)
+            break
+        if(k == kmax):
+            print("numero máximo de iteraciones")
+            break
+        if (masaT > masa + tol):
+            ymax = p0y
+        elif(masaT < masa - tol):
+            ymin = p0y
+        print(masaT)
+    return config, p0y
+#Computo de masa para el shooting sin los calculos de energia
+def Calc_Masa(r, sigtot):
+    sigF = interp1d(r, sigtot, kind='quadratic') #Primero obtenemos sigma por medio de una interpolación 
+    def sigr2(r):
+        return r**2*sigF(r)
+    rmin = r[0]
+    rfin = r[-1]
+    #Integramos usando quad
+    Mas = quad(sigr2, rmin, rfin)[0]  # masa: c*hb/(G*m*Lambda^(1/2))
+    return Mas
 #FORMATO Y PLOTING
 def Plot_paper(datosSig0EnMas, cmap_colors=['#f0784d', '#2681ab'], colormap_resolution=50):
     # Datos
@@ -494,13 +950,13 @@ def Plot_paper(datosSig0EnMas, cmap_colors=['#f0784d', '#2681ab'], colormap_reso
             label=r'stationary (linear) ground state')
 
     # Texto
-    ax.text(x=0.005, y=0.259, s=r'$N=%d$' % mass, fontsize='small')
+    ax.text(x=0.005, y=0.30, s=r'$N=%d$' % mass, fontsize='small')
 
     # Límites y etiquetas
     ax.set_xlabel(r'$\sigma_{x 0}$')
     ax.set_ylabel(r'$\sigma_{y 0}$')
     ax.set_xlim(-0.03, 1.03)
-    ax.set_ylim(-0.01, 0.28)
+    ax.set_ylim(-0.01, 0.3)
 
     # Barra de color
     cbar = fig.colorbar(sm, fraction=0.05, pad=0.02, ax=ax, aspect=20, location='right')
@@ -508,13 +964,14 @@ def Plot_paper(datosSig0EnMas, cmap_colors=['#f0784d', '#2681ab'], colormap_reso
 
     # Leyenda
     ax.legend(loc=(0, 0.02), frameon=False, fontsize=12.5, handletextpad=0.3)
+    plt.savefig('Plot 0,1,0.png', dpi=300, bbox_inches='tight')
     plt.show()
 #Aqui agregué el plot del paper, para tener todo más organizado
 
 def plotPerf(U0, rTmax, LambT, px=True, py=True, pz=True, lim=True):
     rmin, rmax = 0, rTmax
     Nptos = 500; rspan = np.linspace(rmin, rmax, Nptos); arg = [LambT]
-    met = 'RK 45'; Rtol = 1e-09; Atol = 1e-10
+    met = 'RK45'; Rtol = 1e-09; Atol = 1e-10
     sol2 = solve_ivp(systemProca, [rmin, rmax], U0, t_eval=rspan,
                      args=(arg,), method=met, rtol=Rtol, atol=Atol)
     
